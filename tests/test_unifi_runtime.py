@@ -220,3 +220,26 @@ def test_success_response_without_session_cookie_is_not_authenticated(monkeypatc
             assert "unifi_os: login failed" in str(exc)
         else:
             raise AssertionError("Authentication must require a session cookie")
+
+
+def test_login_drops_cached_session_before_posting(monkeypatch):
+    # UniFi OS answers 403 to a login POST that carries a cached TOKEN cookie
+    # without its CSRF header, so the cached session must not ride along.
+    unifi = _build_login_client(monkeypatch)
+    unifi.session.cookies.set("TOKEN", "cached-token")
+    unifi.csrf_token = "cached-csrf"
+    seen_cookies = []
+
+    def login(url, **kwargs):
+        seen_cookies.append(dict(unifi.session.cookies))
+        unifi.session.cookies.set("TOKEN", "fresh-token")
+        return _FakeResponse(payload={"id": "user-1"}, headers={"X-CSRF-Token": "fresh-csrf"})
+
+    with patch.object(unifi.session, "post", side_effect=login), patch.object(
+        unifi, "save_session_to_file", return_value=None
+    ):
+        unifi.authenticate()
+
+    assert seen_cookies == [{}]
+    assert unifi.session.cookies.get("TOKEN") == "fresh-token"
+    assert unifi.csrf_token == "fresh-csrf"
