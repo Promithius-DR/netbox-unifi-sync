@@ -175,7 +175,9 @@ class _OrmObject:
             and getattr(model_field, "many_to_one", False)
             and isinstance(value, int)
         ):
-            setattr(instance, f"{name}_id", value)
+            # get_field() resolves both "role" and "role_id"; always write the
+            # column attribute ("role_id"), never "role_id_id".
+            setattr(instance, model_field.attname, value)
             return
         if name in _OrmObject._CONTENT_TYPE_FIELDS and isinstance(value, str) and "." in value:
             # Convert "app_label.model_name" string → ContentType instance

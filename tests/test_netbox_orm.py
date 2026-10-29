@@ -77,3 +77,34 @@ def test_orm_wrapper_sets_generic_many_to_many_relationships():
     wrapped.interfaces = [1, 2]
 
     assert relation.values == [1, 2]
+
+
+def _device_with_role_fk():
+    class ForeignKey:
+        many_to_one = True
+        many_to_many = False
+        attname = "role_id"
+
+    class Meta:
+        def get_field(self, name):
+            # Django's get_field() resolves both the field name and its attname.
+            if name in ("role", "role_id"):
+                return ForeignKey()
+            raise LookupError(name)
+
+    return type("Device", (), {"_meta": Meta(), "role_id": 1})()
+
+
+def test_setting_fk_attname_with_int_writes_the_column():
+    instance = _device_with_role_fk()
+    _OrmObject(instance).role_id = 7
+
+    assert instance.role_id == 7
+    assert not hasattr(instance, "role_id_id")
+
+
+def test_setting_fk_name_with_int_writes_the_column():
+    instance = _device_with_role_fk()
+    _OrmObject(instance).role = 9
+
+    assert instance.role_id == 9
