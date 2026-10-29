@@ -53,5 +53,12 @@ UNIFI_MODEL_SPECS = {
     "LiteAP AC": {"part_number": "LAP-120", "u_height": 0, "ports": [("eth0", "1000base-t", 1)], "poe_budget": 0},
     "LiteBeam 5AC Gen2": {"part_number": "LBE-5AC-Gen2", "u_height": 0, "ports": [("eth0", "1000base-t", 1)], "poe_budget": 0},
     "Nanostation 5AC": {"part_number": "NS-5AC", "u_height": 0, "ports": [("eth0", "1000base-t", 1)], "poe_budget": 0},
+    # Model code to SKU, from Ubiquiti's device list (static.ui.com/fingerprint/ui/public.json);
+    # codes are a type prefix plus the hardware sysid (UAPA6A4 = UAP + a6a4).
+    "USPM48P": {"part_number": "USW-Pro-Max-48-PoE"},
+    "USWED35": {"part_number": "USW-Flex-2.5G-5"},
+    "UAPA6A4": {"part_number": "U7-Pro-XGS"},
+    "U7PIW": {"part_number": "U7-Pro-Wall"},
+    "UDMPROMAX": {"part_number": "UDM-Pro-Max"},
+    "UCI": {"part_number": "UCI"},
 }
-
