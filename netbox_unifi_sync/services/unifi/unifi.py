@@ -584,6 +584,11 @@ class Unifi:
         auth_errors = []
 
         for mode in self._get_auth_mode_candidates():
+            # A cached session's TOKEN cookie makes UniFi OS reject the login
+            # POST with 403 unless the matching CSRF header is also sent. A
+            # login always starts a new session, so drop the old one first.
+            self.session.cookies.clear()
+            self.csrf_token = None
             payload, otp = self._build_login_payload(mode)
             login_url = f"{self.base_url}{mode['login_endpoint']}"
             logger.debug(f"Trying auth mode '{mode['name']}' via {login_url}")
