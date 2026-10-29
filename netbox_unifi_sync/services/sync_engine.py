@@ -628,6 +628,18 @@ def sync_device_state(nb, nb_device, device):
         logger.info(f"Updated {nb_device.name} status: {current} -> {desired}")
 
 
+def _sync_live_readings():
+    """Whether to write values that change on every poll.
+
+    PoE draw, radio utilization, uptime, last-seen times, client signal and the
+    client's current AP differ on nearly every run. NetBox change-logs every
+    write, so with readings on, each run adds a change record per port, radio,
+    device and client even when nothing about the network changed. Set
+    SYNC_LIVE_READINGS=false to keep them out (default: on, the old behaviour).
+    """
+    return os.getenv("SYNC_LIVE_READINGS", "true").strip().lower() not in ("false", "0", "no", "off")
+
+
 def sync_device_custom_fields(nb, nb_device, device):
     """Sync firmware version, uptime, MAC, and last seen from UniFi to NetBox custom fields."""
     # Ensure custom fields exist
@@ -647,7 +659,8 @@ def sync_device_custom_fields(nb, nb_device, device):
     if firmware and cf.get("unifi_firmware") != firmware:
         cf["unifi_firmware"] = firmware
         changed = True
-    if uptime is not None:
+    readings = _sync_live_readings()
+    if uptime is not None and readings:
         try:
             uptime_int = int(uptime)
             if cf.get("unifi_uptime") != uptime_int:
@@ -659,7 +672,7 @@ def sync_device_custom_fields(nb, nb_device, device):
         cf["unifi_mac"] = mac
         changed = True
     # Last seen: store as ISO timestamp or raw value
-    if last_seen:
+    if last_seen and readings:
         last_seen_str = str(last_seen)
         # Convert epoch seconds to readable format
         if last_seen_str.isdigit() and len(last_seen_str) >= 10:
@@ -1339,6 +1352,8 @@ def _client_description(client_data):
     ssid = str(client_data.get("ssid") or "").strip()
     if ssid:
         parts.append(f"SSID: {ssid}")
+    if not _sync_live_readings():
+        return " | ".join(parts)
     ap_name = str(client_data.get("ap_name") or "").strip()
     if ap_name:
         parts.append(f"AP: {ap_name}")
@@ -1753,7 +1768,7 @@ def _build_port_description(port, *, is_uplink=False, poe=None, speed_mbps=None)
         "poe_power_watts",
         "poe_power_mw",
     ))
-    if poe_draw:
+    if poe_draw and _sync_live_readings():
         parts.append(f"PoE draw: {poe_draw}")
 
     if speed_mbps:
@@ -1789,7 +1804,7 @@ def _build_radio_description(radio):
         parts.append(f"TX: {tx_power}{suffix}")
 
     utilization = _first_port_value(radio, "utilization", "cu_total", "channelUtilization")
-    if utilization not in (None, ""):
+    if utilization not in (None, "") and _sync_live_readings():
         parts.append(f"Utilization: {utilization}%")
 
     noise = _first_port_value(radio, "noise", "noiseFloor", "noise_floor")
