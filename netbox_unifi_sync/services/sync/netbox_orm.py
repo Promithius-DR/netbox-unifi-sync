@@ -81,6 +81,24 @@ class _ChoiceValue(str):
 # Thin wrapper around a Django model instance
 # ---------------------------------------------------------------------------
 
+def _snapshot_before_change(instance):
+    """Snapshot an existing object once, before its first modification.
+
+    NetBox writes an update ObjectChange only when the pre-change snapshot
+    differs from the saved state (CHANGELOG_SKIP_EMPTY_CHANGES). A snapshot
+    taken at save() time, after the attributes were changed, equals the new
+    state, so the update was silently dropped from the change log.
+    """
+    if not getattr(instance, "pk", None) or not hasattr(instance, "snapshot"):
+        return
+    if instance.__dict__.get("_prechange_snapshot") is not None:
+        return
+    try:
+        instance.snapshot()
+    except Exception as exc:
+        logger.debug("snapshot() failed on %r (non-fatal): %s", instance, exc)
+
+
 class _OrmObject:
     """
     Wraps a Django model instance and exposes it with attribute-style access,
@@ -143,6 +161,7 @@ class _OrmObject:
             object.__setattr__(self, name, value)
             return
         instance = object.__getattribute__(self, "_instance")
+        _snapshot_before_change(instance)
         # tags: django-taggit uses .set() on the manager; plain assignment is
         # not supported.  Accept a list of Tag PKs or Tag instances (pynetbox
         # passes PKs after reading tag IDs via __getattr__).
@@ -201,17 +220,17 @@ class _OrmObject:
 
     def save(self, update_fields=None):
         instance = object.__getattribute__(self, "_instance")
-        # Call snapshot() before saving existing objects so NetBox change log
-        # records the pre-change state (prechange_data) correctly.
-        if instance.pk and hasattr(instance, 'snapshot'):
-            try:
-                instance.snapshot()
-            except Exception as exc:
-                logger.debug("snapshot() failed on %r (non-fatal): %s", instance, exc)
+        # The pre-change snapshot is normally taken by __setattr__ before the
+        # first modification; take one here only if nothing was modified
+        # through the wrapper.
+        _snapshot_before_change(instance)
         if update_fields:
             instance.save(update_fields=update_fields)
         else:
             instance.save()
+        # The change record has been written by the post_save handler; the next
+        # modification needs a fresh snapshot.
+        instance.__dict__.pop("_prechange_snapshot", None)
 
     def delete(self):
         instance = object.__getattribute__(self, "_instance")
