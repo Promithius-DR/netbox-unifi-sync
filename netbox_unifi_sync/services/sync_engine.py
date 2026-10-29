@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import json
 from slugify import slugify
 import os
@@ -28,6 +29,18 @@ from .sync.runtime_config import (
     load_runtime_config,
 )
 from .sync.runtime_config import _unifi_verify_ssl, _netbox_verify_ssl, _sync_interval_seconds  # noqa: F401
+
+
+def _submit_with_context(executor, fn, *args, **kwargs):
+    """Submit work that keeps the caller's context variables.
+
+    NetBox writes change log records only when ``netbox.context.current_request``
+    is set. Worker threads start with an empty context, so objects saved in
+    them were never change-logged. Each task gets its own copy of the
+    submitting thread's context (a Context cannot be entered by two threads).
+    """
+    ctx = contextvars.copy_context()
+    return executor.submit(ctx.run, fn, *args, **kwargs)
 from .sync.log_sanitizer import SensitiveDataFormatter
 from .sync.vrf import get_or_create_vrf, get_vrf_for_site  # noqa: F401
 from .unifi.unifi import Unifi
@@ -3283,7 +3296,7 @@ def process_site(unifi, nb, site_obj, site_display_name, nb_site, nb_ubiquity, t
             with ThreadPoolExecutor(max_workers=MAX_DEVICE_THREADS) as executor:
                 futures = []
                 for device in devices:
-                    futures.append(executor.submit(process_device, unifi, nb, nb_site, device, nb_ubiquity, tenant, unifi_device_ips=unifi_device_ips, unifi_site_obj=site_obj))
+                    futures.append(_submit_with_context(executor, process_device, unifi, nb, nb_site, device, nb_ubiquity, tenant, unifi_device_ips=unifi_device_ips, unifi_site_obj=site_obj))
 
                 for future in as_completed(futures):
                     try:
@@ -3412,7 +3425,7 @@ def process_controller(unifi_url, unifi_username, unifi_password, unifi_mfa_secr
                     logger.warning(f"No match found for Ubiquity site: {site_name}. Skipping...")
                     continue
 
-                futures.append(executor.submit(process_site, unifi, nb, site_obj, site_name, nb_site, nb_ubiquity, tenant))
+                futures.append(_submit_with_context(executor, process_site, unifi, nb, site_obj, site_name, nb_site, nb_ubiquity, tenant))
 
             # Wait for all site-processing threads to complete
             for future in as_completed(futures):
@@ -3428,7 +3441,8 @@ def process_all_controllers(unifi_url_list, unifi_username, unifi_password, unif
     with ThreadPoolExecutor(max_workers=MAX_CONTROLLER_THREADS) as executor:
         future_to_url = {}
         for url in unifi_url_list:
-            future = executor.submit(
+            future = _submit_with_context(
+                executor,
                 process_controller,
                 url,
                 unifi_username,
