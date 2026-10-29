@@ -2403,7 +2403,9 @@ def infer_role_key_for_device(device):
     if "routing" in features or "ROUTER" in model:
         return "ROUTER"
 
-    if {"switching", "switch", "ports"} & features:
+    # The legacy stat/device payload carries no features list; it labels
+    # switches with type "usw" instead.
+    if {"switching", "switch", "ports"} & features or str(device.get("type", "")).lower() == "usw":
         return "LAN"
 
     return "UNKNOWN"
