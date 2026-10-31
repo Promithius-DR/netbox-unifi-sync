@@ -2655,6 +2655,46 @@ def _sync_templates(nb, nb_device_type, model, template_endpoint, expected, labe
     logger.info(f"Synced {len(expected)} {label} templates for {model}")
 
 
+def part_number_for_model(model):
+    """Return the Ubiquiti part number (SKU) for a UniFi model code, if known."""
+    hardcoded = UNIFI_MODEL_SPECS.get(model) or {}
+    if hardcoded.get("part_number"):
+        return hardcoded["part_number"]
+    specs = _resolve_device_specs(model) or {}
+    return specs.get("part_number") or None
+
+
+def _normalise_part_number(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+
+
+def find_device_type(nb, manufacturer, model):
+    """Find the NetBox device type for a UniFi model code.
+
+    Returns (device_type, curated). A type whose part number matches the
+    model's SKU wins over one whose model field equals the code, so a type
+    can carry the product name as its model (the devicetype-library
+    convention, e.g. "UniFi Switch Pro Max 48 PoE" with part number
+    "USW-Pro-Max-48-PoE") and still be found. curated is True when the match
+    came through the part number on a type not named after the code.
+    """
+    part_number = part_number_for_model(model)
+    if part_number:
+        # Spellings differ between sources ("UDM-Pro-Max" vs "UDM-PRO-MAX",
+        # "USW-Flex-2.5G-5" vs "USW-Flex-2-5G-5"): compare normalised.
+        wanted = _normalise_part_number(part_number)
+        candidates = [
+            t for t in nb.dcim.device_types.filter(manufacturer_id=manufacturer.id)
+            if _normalise_part_number(t.part_number) == wanted
+        ]
+        curated = [t for t in candidates if str(t.model) != model]
+        if curated:
+            return curated[0], True
+        if candidates:
+            return candidates[0], False
+    return nb.dcim.device_types.get(model=model, manufacturer_id=manufacturer.id), False
+
+
 def ensure_device_type_specs(nb, nb_device_type, model):
     """Ensure a device type has correct specs (part number, u_height, interface templates)
     based on merged UNIFI_MODEL_SPECS + community library. Also syncs console/power port templates."""
@@ -2795,7 +2835,7 @@ def process_device(unifi, nb, site, device, nb_ubiquity, tenant, unifi_device_ip
 
         # Device Type creation
         logger.debug(f"Checking for existing device type: {device_model} (manufacturer ID: {nb_ubiquity.id})")
-        nb_device_type = nb.dcim.device_types.get(model=device_model, manufacturer_id=nb_ubiquity.id)
+        nb_device_type, curated_type = find_device_type(nb, nb_ubiquity, device_model)
         if not nb_device_type:
             # Pre-populate from community specs when creating a new device type
             specs = _resolve_device_specs(device_model)
@@ -2843,7 +2883,11 @@ def process_device(unifi, nb, site, device, nb_ubiquity, tenant, unifi_device_ip
                     logger.error("Failed to create device type in NetBox")
                     return
         # Ensure device type has correct specs (ports, PoE, part number, etc.)
-        ensure_device_type_specs(nb, nb_device_type, device_model)
+        # A type matched by part number was curated by someone else (for example
+        # imported from the devicetype-library with its own name, templates and
+        # images); leave its specs alone.
+        if not curated_type:
+            ensure_device_type_specs(nb, nb_device_type, device_model)
 
         # Check for existing device
         logger.debug(f"Checking if device already exists: {device_name} (serial: {device_serial})")
@@ -3692,7 +3736,9 @@ def _build_netbox_context(config):
     nb = build_netbox_orm_client()
     logger.debug("NetBox ORM client ready")
 
-    nb_ubiquity = nb.dcim.manufacturers.get(slug="ubiquity")
+    # "ubiquiti" is the devicetype-library slug; "ubiquity" is what older
+    # versions of this plugin created.
+    nb_ubiquity = nb.dcim.manufacturers.get(slug="ubiquiti") or nb.dcim.manufacturers.get(slug="ubiquity")
     try:
         tenant_name = config['NETBOX']['TENANT']
     except (KeyError, TypeError):
@@ -3767,7 +3813,7 @@ def _build_netbox_context(config):
     logger.debug(f"Prepared {len(netbox_sites_dict)} NetBox sites for mapping")
 
     if not nb_ubiquity:
-        nb_ubiquity = nb.dcim.manufacturers.create({"name": "Ubiquity Networks", "slug": "ubiquity"})
+        nb_ubiquity = nb.dcim.manufacturers.create({"name": "Ubiquiti", "slug": "ubiquiti"})
         if nb_ubiquity:
             logger.info(f"Ubiquity manufacturer with ID {nb_ubiquity.id} successfully added to Netbox.")
 
