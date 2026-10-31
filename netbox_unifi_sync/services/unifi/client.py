@@ -11,12 +11,14 @@ class Client(BaseResource):
     Integration API v1:  /sites/{site_id}/clients
         Returns all known clients (online + recently offline) with lastSeen timestamp.
 
-    Legacy API:  /api/s/{site_name}/stat/user
-        Returns all known clients with last_seen timestamp.
+    Legacy API:  /api/s/{site_name}/stat/sta
+        Returns the currently connected clients with their current ip,
+        last_seen, essid and signal, which is what client IP sync reads.
+        (stat/user needs a MAC and returns api.err.IdRequired without one.)
     """
     API_PATH = "/api/s"
     BASE_PATH = "stat"
-    LEGACY_ENDPOINT = "user"
+    LEGACY_ENDPOINT = "sta"
     INTEGRATION_API_PATH = "/sites"
     INTEGRATION_ENDPOINT = "clients"
 
