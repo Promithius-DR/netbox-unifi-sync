@@ -77,3 +77,56 @@ def test_orm_wrapper_sets_generic_many_to_many_relationships():
     wrapped.interfaces = [1, 2]
 
     assert relation.values == [1, 2]
+
+
+class _ChangeLoggedDevice:
+    """Mimics NetBox's ChangeLoggingMixin: snapshot() records current state."""
+
+    class _meta:
+        @staticmethod
+        def get_field(name):
+            raise LookupError(name)
+
+    def __init__(self):
+        self.pk = 1
+        self.name = "old"
+        self.snapshots = []
+        self.saved = []
+
+    def snapshot(self):
+        self._prechange_snapshot = {"name": self.name}
+        self.snapshots.append(dict(self._prechange_snapshot))
+
+    def save(self, update_fields=None):
+        # NetBox's post_save handler compares this snapshot with the new state.
+        self.saved.append((self._prechange_snapshot, {"name": self.name}))
+
+
+def test_snapshot_taken_before_first_change():
+    instance = _ChangeLoggedDevice()
+    wrapped = _OrmObject(instance)
+    wrapped.name = "new"
+    wrapped.save()
+
+    assert instance.saved == [({"name": "old"}, {"name": "new"})]
+
+
+def test_each_save_gets_a_fresh_snapshot():
+    instance = _ChangeLoggedDevice()
+    wrapped = _OrmObject(instance)
+    wrapped.name = "second"
+    wrapped.save()
+    wrapped.name = "third"
+    wrapped.save()
+
+    assert instance.saved == [
+        ({"name": "old"}, {"name": "second"}),
+        ({"name": "second"}, {"name": "third"}),
+    ]
+
+
+def test_save_without_changes_still_snapshots():
+    instance = _ChangeLoggedDevice()
+    _OrmObject(instance).save()
+
+    assert instance.saved == [({"name": "old"}, {"name": "old"})]
